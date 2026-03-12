@@ -801,7 +801,127 @@ This is the key question. If yes, Option B becomes more viable. If no, OpenClaw 
 
 ---
 
-## 13. Development Phases
+## 13. Infrastructure Discussion: Do We Need the Mac mini?
+
+> **Status: OPEN — Under Discussion**
+>
+> This section captures the ongoing evaluation. No final decision has been made.
+
+### What the Mac mini Currently Does
+
+| Task | Essence | Requires Physical Hardware? |
+|------|---------|---------------------------|
+| Receive Teams Webhook | Web server | No — any HTTP server host works |
+| RAG retrieval | Vector DB + BM25 search | No — cloud services can do this |
+| PII masking | String processing | No |
+| Call Cloud LLM API | HTTP client | No |
+| Ticket / DB | SQLite or PostgreSQL | No |
+| Log storage | Write file / write DB | No |
+
+**None of the Mac mini's tasks require physical hardware.** It is simply a server running Python/Node services.
+
+### Original Rationale for Mac mini
+
+The spec emphasized "data stays in the company" for security confidence:
+
+> Mac mini serves as the company's internal AI Gateway, completing data retrieval, masking, and process control before sending anything externally.
+
+The Mac mini exists to:
+
+1. **Give management confidence** — "We have our own machine in control"
+2. **Data locality** — Helpdesk history, tickets, logs stored on-premise
+3. **Masking before data leaves the company** — Ensure PII never reaches cloud
+
+### The Contradiction: Cloud LLM Already Chosen
+
+Since LLM calls already go to cloud APIs (Claude / ChatGPT / Grok), the "data never leaves the company" premise is already weakened. The difference is:
+
+- What's sent out is **masked minimal context**, not raw data
+- But this masking logic works **identically** whether it runs on an Azure VM or a Mac mini
+
+### Critical Fact: Teams Bot Always Goes Through Azure
+
+Regardless of where the Gateway runs, the message flow is:
+
+```
+Teams → Microsoft Cloud → Azure Bot Service → Webhook to your server
+```
+
+Even with Mac mini, messages already travel through Microsoft's cloud. The Mac mini only means "processing logic runs on-premise" — it does NOT mean "data never touches the cloud."
+
+### Deployment Options Under Consideration
+
+#### Option A: Keep Mac mini (Current Plan)
+
+```
+Teams → Azure Bot Service → Webhook → Mac mini (Gateway + DB + RAG) → Cloud LLM
+```
+
+| Pros | Cons |
+|------|------|
+| Management feels secure about data locality | Must maintain hardware |
+| Raw data physically on-premise | Need fixed IP / DDNS / tunnel for webhook |
+| No cloud hosting fees | Mac mini is single point of failure, no HA |
+| | Extra tunnel layer adds latency & complexity |
+
+#### Option B: Full Azure Deployment
+
+```
+Teams → Azure Bot Service → Azure App Service (Gateway) → Azure DB → Cloud LLM
+```
+
+| Pros | Cons |
+|------|------|
+| No hardware maintenance | Monthly cloud hosting fees |
+| Auto-scaling, HA built-in | Data resides in cloud (but masking still applies) |
+| Native Teams ecosystem integration | Management may have concerns about data locality |
+| Teams Bot registration already requires Azure | |
+| Danny has one less thing to maintain | |
+
+#### Option C: Hybrid — Azure Runs Services, Company Stores Raw Data
+
+```
+Teams → Azure (Gateway + RAG) → Cloud LLM
+               |
+               +→ VPN/API → Company internal DB (raw data, logs, audit)
+```
+
+| Pros | Cons |
+|------|------|
+| Service stability from cloud | More complex architecture |
+| Raw data stays on-premise | Need VPN or secure API between Azure and internal DB |
+| Satisfies both operational & security needs | Additional latency for DB operations |
+| Best narrative for management | |
+
+### Adjusted Executive Narrative (if moving away from Mac mini)
+
+> The system is deployed on Azure within the same ecosystem as Microsoft Teams. All data sent to AI models is masked and minimized. Raw data is stored in company-controlled databases with full audit logging.
+
+### Key Factors for Decision
+
+1. **Danny's maintenance capacity** — Does Danny want to maintain a physical server + tunnel + networking on top of his IT workload?
+2. **Management's security stance** — Is "masking before sending" sufficient, or do they require physical data locality?
+3. **Budget** — Azure App Service basic tier (~$13-55/month) vs Mac mini hardware + electricity + networking
+4. **Reliability requirements** — Is downtime acceptable when Mac mini reboots / crashes / loses network?
+5. **Future scalability** — If usage grows, Azure scales; Mac mini does not
+
+### Current Leaning (Not Final)
+
+Arguments favor **Option B (full Azure)** or **Option C (hybrid)** over keeping the Mac mini, primarily because:
+
+- Teams Bot already requires Azure Bot Service registration
+- Cloud LLM already sends data externally (masked)
+- Mac mini adds a tunnel + hardware maintenance burden
+- Single point of failure risk
+
+**However, this is an open discussion.** Management comfort and company security policy may override technical arguments. The architecture should be designed to work with any of the three options — the Gateway is a software layer, deployable anywhere.
+
+---
+
+## 14. Development Phases (Updated Note)
+
+> Infrastructure choice (Mac mini vs Azure vs Hybrid) affects Phase 1 setup.
+> Once decided, update Phase 1 to reflect the chosen deployment target.
 
 ### Phase 0: Data Validation
 
@@ -845,7 +965,7 @@ This is the key question. If yes, Option B becomes more viable. If no, OpenClaw 
 
 ---
 
-## 14. Value Proposition
+## 15. Value Proposition
 
 ### For Danny (IT Staff)
 
