@@ -18,6 +18,7 @@ load_dotenv()
 SETTINGS = BotFrameworkAdapterSettings(
     app_id=os.getenv("MicrosoftAppId", ""),
     app_password=os.getenv("MicrosoftAppPassword", ""),
+    channel_auth_tenant=os.getenv("MicrosoftAppTenantId") or None,
 )
 ADAPTER = BotFrameworkAdapter(SETTINGS)
 
