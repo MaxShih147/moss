@@ -4,7 +4,15 @@ from botbuilder.core.teams import TeamsInfo
 from llm import OpenAIProvider
 from rag import HelpdeskRetriever
 from store import MockSystemStore, MockTicketStore
-from ticketing import CreateTicketDialog, detect_intent, format_my_tickets
+from ticketing import (
+    CreateTicketDialog,
+    HELP_TEXT,
+    add_reply,
+    assign_ticket,
+    detect_intent,
+    format_my_tickets,
+    list_tickets,
+)
 from ticketing.summarize import close_and_summarize
 
 SYSTEM_PROMPT = """你是 Danny Bot，普羅森科技的 IT Helpdesk 助理，部署在 Microsoft Teams 上。
@@ -79,16 +87,11 @@ class DannyBot(ActivityHandler):
         user_text = turn_context.activity.text or ""
         user_id, user_name, user_email = await self._get_user_info(turn_context)
 
-        if user_text.strip().startswith("/close "):
-            try:
-                ticket_id = int(user_text.strip().split()[1])
-                updated = await close_and_summarize(ticket_id, self.ticket_store, self.llm)
-                await turn_context.send_activity(MessageFactory.text(
-                    f"工單 #{updated.id} 已結案 ✓\n\n處理方式：\n{updated.resolution}"
-                ))
-                return
-            except Exception as e:
-                await turn_context.send_activity(MessageFactory.text(f"結案失敗：{e}"))
+        stripped = user_text.strip()
+        if stripped.startswith("/"):
+            reply = await self._handle_command(stripped, user_name)
+            if reply is not None:
+                await turn_context.send_activity(MessageFactory.text(reply))
                 return
 
         state = self.create_dialog.state_for(user_id)
@@ -127,6 +130,52 @@ class DannyBot(ActivityHandler):
             reply = f"抱歉，我目前無法處理您的問題。請直接聯繫 IT 人員。\n\n（錯誤：{type(e).__name__}）"
 
         await turn_context.send_activity(MessageFactory.text(reply))
+
+    async def _handle_command(self, text: str, caller_name: str):
+        parts = text.split(maxsplit=2)
+        cmd = parts[0].lower()
+
+        if cmd == "/help":
+            return HELP_TEXT
+
+        if cmd == "/list":
+            arg = parts[1] if len(parts) >= 2 else ""
+            return await list_tickets(self.ticket_store, arg, caller_name)
+
+        if cmd == "/assign":
+            if len(parts) < 3:
+                return "用法：`/assign <工單id> <人名>`"
+            try:
+                tid = int(parts[1])
+            except ValueError:
+                return "工單 id 必須是數字"
+            return await assign_ticket(self.ticket_store, tid, parts[2])
+
+        if cmd == "/reply":
+            if len(parts) < 3:
+                return "用法：`/reply <工單id> <處理紀錄>`"
+            try:
+                tid = int(parts[1])
+            except ValueError:
+                return "工單 id 必須是數字"
+            return await add_reply(self.ticket_store, tid, parts[2])
+
+        if cmd == "/close":
+            if len(parts) < 2:
+                return "用法：`/close <工單id>`"
+            try:
+                tid = int(parts[1])
+            except ValueError:
+                return "工單 id 必須是數字"
+            try:
+                updated = await close_and_summarize(tid, self.ticket_store, self.llm)
+                return f"工單 #{updated.id} 已結案 ✓\n\n處理方式：\n{updated.resolution}"
+            except KeyError:
+                return f"工單 #{tid} 不存在"
+            except Exception as e:
+                return f"結案失敗：{type(e).__name__}: {e}"
+
+        return None
 
     async def on_members_added_activity(self, members_added, turn_context: TurnContext):
         for member in members_added:
