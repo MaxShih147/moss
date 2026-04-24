@@ -8,3 +8,4 @@ data/*.parquet
 docs/Helpdesk.xlsx
 teams-app/danny-bot.zip
 .claude/
+store/_data/
