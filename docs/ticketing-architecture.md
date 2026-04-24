@@ -17,6 +17,19 @@
 5. **處理方式沉澱為知識**：IT 每次結單時，AI 自動把回覆整理成乾淨的「處理方式」，給未來 RAG 使用
 6. **完全在 Microsoft 生態內**：不新增第三方系統，資料留在 Phrozen 租戶
 
+## 1.1 設計原則：零個人帳號依賴
+
+**所有對外部系統的存取都用 bot 自己的身份（Azure AD App service principal），不綁任何員工個人帳號。**
+
+具體包含：
+- Bot ↔ SharePoint（Graph API）：Application permissions，bot service principal
+- Bot ↔ Teams：Bot Framework 內建的 bot identity（MicrosoftAppId/Password）
+- Bot ↔ OpenAI：公司購買的 organization key（非個人帳號 key）
+- **不使用 Power Automate**（Flow 預設綁建立者帳號，人離職就爛），所有自動化／事件／排程**都跑在 bot 內部**
+- 員工識別只從 Teams 訊息 metadata 讀（bot 不代員工做事，只是用他 email 當 SharePoint 查詢條件）
+
+Max 或任何員工的離職／密碼輪替 **完全不應影響系統運作**。
+
 ---
 
 ## 2. 架構總覽
@@ -36,34 +49,36 @@
             │                │   Graph API    │                        │
             │                └───────┬────────┘                        │
             │                        │                                 │
-            │     ┌──────────────────┼──────────────────┐              │
-            │     │                  │                  │              │
-            │  ┌──┴──────┐    ┌──────┴────────┐  ┌──────┴─────────┐    │
-            │  │ Power   │    │  Danny Bot    │  │  SharePoint    │    │
-            │  │Automate │    │  (Python app) │  │  內建 UI       │    │
-            │  │         │    │               │  │  (IT 管理)     │    │
-            │  │  通知 / │    │  - 問答 (RAG) │  │                │    │
-            │  │  觸發   │    │  - 建單       │  └────────────────┘    │
-            │  │  摘要   │    │  - 查單       │                        │
-            │  └──┬──────┘    │  - AI 摘要    │                        │
-            │     │           └──────┬────────┘                        │
-            │     │                  │                                 │
-            │     │           ┌──────┴────────┐                        │
-            │     │           │   Chroma      │                        │
-            │     │           │   (RAG 索引)  │                        │
-            │     │           └───────────────┘                        │
-            │     │                                                    │
-            └─────┼────────────────────────────────────────────────────┘
-                  │
-          ┌───────┴────────┐
-          │  Teams 頻道    │
-          │  (通知 IT)     │
-          └────────────────┘
+            │                        │                                 │
+            │              ┌─────────┴──────────┐   ┌──────────────┐   │
+            │              │    Danny Bot       │   │  SharePoint  │   │
+            │              │    (Python app)    │   │  內建 UI     │   │
+            │              │                    │   │  (IT 管理)   │   │
+            │              │  ┌──────────────┐  │   └──────────────┘   │
+            │              │  │ 對話 Handler │  │                      │
+            │              │  │  - 問答(RAG) │  │                      │
+            │              │  │  - 建單      │  │                      │
+            │              │  │  - 查單      │  │                      │
+            │              │  └──────────────┘  │                      │
+            │              │  ┌──────────────┐  │                      │
+            │              │  │ 事件 Worker  │  │                      │
+            │              │  │ (背景 loop)  │──┼──→ 發訊息到 Teams    │
+            │              │  │  - 新單偵測  │  │    (IT 頻道)         │
+            │              │  │  - 結單摘要  │  │                      │
+            │              │  │  - SLA 檢查  │  │                      │
+            │              │  └──────────────┘  │                      │
+            │              │  ┌──────────────┐  │                      │
+            │              │  │   Chroma     │  │                      │
+            │              │  │  (RAG 索引)  │  │                      │
+            │              │  └──────────────┘  │                      │
+            │              └────────────────────┘                      │
+            │                                                          │
+            └──────────────────────────────────────────────────────────┘
 ```
 
-- **Bot 不再直接讀 xlsx**，而是讀 SharePoint Lists（透過 Graph API）
-- **Chroma 索引**改成從 Tickets List 同步（定期 rebuild），內容是「處理方式」而非原始 Reply
-- **Power Automate** 負責所有「事件驅動」邏輯：新單通知、結單觸發摘要
+- **Bot 不再讀 xlsx**，改讀 SharePoint Lists（透過 Graph API，使用 bot service principal）
+- **事件驅動全在 bot 內**（背景 worker loop），不用 Power Automate，避免綁個人帳號
+- **Chroma 索引**從 Tickets List 同步，內容是 AI 摘要後的「處理方式」
 - **SharePoint 內建 UI** 就是 IT 的管理介面，不需要寫新 web app
 
 ---
@@ -161,48 +176,64 @@ VPN           → Danny / Leny
   - 權限控管
   - 附件支援
 
-### 4.3 Power Automate（事件驅動層）
+### 4.3 事件 Worker（bot 內部背景 loop）
 
-定義三個 Flow：
+**不用 Power Automate**。bot 啟動時起一個 async background task，週期性 poll SharePoint 找變動。這樣所有自動化都跑在 bot service principal 下，不綁任何員工。
 
-**Flow 1: 新工單通知**
-```
-Trigger: Tickets List - When item is created
-Action:  Post message to Teams channel "IT-Helpdesk"
-         訊息模板：
-         @{Assignee} 新工單 #{ID}
-         類別：{System}   報修人：{Requester}
-         {Description}
-         [ 查看工單 ]({item_url})
-```
-
-**Flow 2: 結單觸發 AI 摘要**
-```
-Trigger: Tickets List - When item is modified,
-         Filter: Status = "Done" AND Resolution is empty
-Action:  HTTP POST -> https://<bot-public-url>/api/summarize
-         Body: { "ticketId": @{ID} }
-```
-
-**Flow 3（選配）: SLA 提醒**
-```
-Trigger: Scheduled daily
-Action:  Query Tickets where Status=New AND CreatedAt > 24h ago
-         Post 提醒到 IT Teams 頻道
-```
-
-### 4.4 AI 摘要（新端點）
-
-在 `app.py` 新增路由：
+**基本策略：輪詢 + 記 cursor**
 
 ```python
-APP.router.add_post("/api/summarize", summarize_ticket)
+# 虛擬碼
+async def event_worker():
+    cursor = load_last_processed_timestamp()
+    while True:
+        changed = graph.list_tickets_modified_after(cursor)
+        for ticket in changed:
+            await handle_ticket_change(ticket)
+        cursor = max(cursor, max(t.lastModified for t in changed))
+        save_cursor(cursor)
+        await asyncio.sleep(60)  # 每 60 秒 poll 一次
 ```
 
+**三個內建任務：**
+
+**Task 1: 新工單通知**
+```
+偵測：Tickets List 有新 item（Status=New）
+動作：bot 用 Bot Framework proactive message API，發訊息到 IT Teams 頻道
+     @Assignee 新工單 #{ID}
+     類別：{System}   報修人：{Requester}
+     {Description}
+     [ 查看工單 ]({item_url})
+```
+
+**Task 2: 結單觸發 AI 摘要**
+```
+偵測：item 被改動，且 Status=Done AND Resolution is empty
+動作：bot 呼叫 LLM 摘要 Reply → 寫回 Resolution → 更新 Chroma 索引
+```
+
+**Task 3: SLA 提醒（排程型）**
+```
+週期：每天早上 9 點觸發一次（用 APScheduler 或 asyncio timer）
+動作：Query Tickets where Status=New AND CreatedAt > 24h ago
+     發提醒到 IT Teams 頻道
+```
+
+**容錯**：
+- `cursor` 持久化到本地檔案或 Chroma，bot 重啟不會漏單
+- 處理失敗的 item 加入 retry queue
+- 背景 loop exception 不能讓主 bot crash（用 `try/except` 包住）
+
+**未來升級路徑**：如果 poll 效能不夠，可改用 **Microsoft Graph change notifications**（push 型 webhook），但 webhook 要處理續約、驗證簽章等細節。小流量用輪詢就夠。
+
+### 4.4 AI 摘要流程
+
+由 §4.3 的 **Task 2** 觸發（bot 自己偵測，不是外部呼叫）。
+
 邏輯：
-1. 驗證 Power Automate 的 auth（shared secret）
-2. Graph API 取 ticket → 讀 `Description` + `Reply`
-3. 呼叫 OpenAI 摘要 prompt：
+1. 讀 ticket 的 `Description` + `Reply`
+2. 呼叫 OpenAI 摘要 prompt：
    ```
    你是 IT 工單助理。根據以下原始處理紀錄，寫一段精簡的「處理方式」
    （2-4 句中文），讓未來遇到同樣問題的人能快速參考。
@@ -215,8 +246,8 @@ APP.router.add_post("/api/summarize", summarize_ticket)
    - 點出 root cause 和解法
    - 若需聯絡廠商／同事，寫出來
    ```
-4. 結果寫回 `Resolution` 欄位
-5. 觸發 RAG 索引更新（加這一筆到 Chroma）
+3. 結果寫回 SharePoint Tickets List 的 `Resolution` 欄
+4. 同步更新 Chroma 索引（upsert 該 ticket 的 embedding）
 
 ### 4.5 RAG 索引更新
 
@@ -350,14 +381,17 @@ GRAPH_CLIENT_SECRET=<Azure AD app 的 secret>
 SHAREPOINT_SITE_ID=<target site 的 GUID>
 SYSTEMS_LIST_ID=<List 1 的 GUID>
 TICKETS_LIST_ID=<List 2 的 GUID>
-SUMMARIZE_SHARED_SECRET=<給 Power Automate 呼叫 bot 用的 shared secret>
+IT_TEAMS_CHANNEL_ID=<IT 通知頻道 id，給事件 worker 發訊息用>
 ```
+
+（不需要 Power Automate 相關 secret，因為沒用 Power Automate。）
 
 ### 6.3 依賴套件新增
 
 ```
-msal>=1.24.0           # Azure AD auth
-httpx>=0.25.0          # Graph API calls
+msal>=1.24.0             # Azure AD auth
+httpx>=0.25.0            # Graph API calls
+apscheduler>=3.10.0      # 事件 worker 排程
 ```
 
 ### 6.4 程式碼結構
@@ -377,9 +411,11 @@ moss/
     tickets.py          Tickets List CRUD
   ticketing/            (新增)
     __init__.py
-    create.py           建單流程
+    create.py           建單流程（對話驅動）
     query.py            查單流程
-    summarize.py        AI 摘要
+    summarize.py        AI 摘要邏輯
+    worker.py           事件 worker（背景 loop）
+    notify.py           proactive Teams message 發送
   scripts/
     migrate_xlsx_to_list.py   (新增) 780 筆歷史匯入
     bulk_summarize.py         (新增) 歷史工單批次 AI 摘要
@@ -393,15 +429,15 @@ moss/
 ## 7. 實做分階段
 
 ```
-Phase 2.0  權責表上線              0.5 天  (我改 bot + 你建 List 1)
-Phase 2.1  建單流程                 2 天   (我寫建單對話 + 你建 List 2)
-Phase 2.2  新工單通知 (Power Automate) 0.5 天  (你設 Flow)
-Phase 2.3  員工查單                1 天   (我寫查詢對話)
-Phase 2.4  AI 摘要處理方式         1.5 天  (我寫 endpoint + 你設 Flow)
-Phase 2.5  歷史 xlsx 遷移 + 批次摘要 1 天   (我寫 migration script)
-Phase 2.6  RAG 切到 List 為資料源   0.5 天  (我改 retriever)
+Phase 2.0  權責表上線                    0.5 天  (我改 bot + 你建 List 1)
+Phase 2.1  建單流程                       2 天   (我寫建單對話 + 你建 List 2)
+Phase 2.2  事件 worker + 新單通知         1 天   (我寫背景 loop + proactive msg)
+Phase 2.3  員工查單                      1 天   (我寫查詢對話)
+Phase 2.4  AI 摘要處理方式（整合進 worker） 1 天   (我寫 Task 2 摘要邏輯)
+Phase 2.5  歷史 xlsx 遷移 + 批次摘要       1 天   (我寫 migration script)
+Phase 2.6  RAG 切到 List 為資料源          0.5 天  (我改 retriever)
 ─────────────────────────────────────
-總計                                ~7 天人日（純工時）
+總計                                    ~7 天人日（純工時）
 ```
 
 **實際時程**會受這些因素影響：
@@ -422,7 +458,7 @@ Phase 2.6  RAG 切到 List 為資料源   0.5 天  (我改 retriever)
 | R1 | IT 部門不願換工具 | 整個專案停擺 | Phase 2.0 做個原型先給 Danny 看 |
 | R2 | Graph API 權限批不下來 | bot 無法讀寫 Lists | 備案：退回到 OneDrive sync + 腳本更新 |
 | R3 | 員工覺得 bot 問答不準而繞過它 | 工單仍靠 Excel 手建 | AI 摘要補齊知識庫、初期 bot 答不好時直接建單流暢 |
-| R4 | Power Automate Flow 壞掉沒被發現 | 通知漏發、摘要沒跑 | 監控 Flow 執行歷史，加失敗告警 |
+| R4 | 事件 worker 背景 loop 靜默掛掉 | 通知漏發、摘要沒跑 | worker 內 try/except 保護、重要失敗發警報到 IT 頻道、bot 健康檢查 endpoint |
 | R5 | SharePoint List 效能瓶頸 | 工單 >5000 筆後查詢慢 | List view threshold 預設 5000，達到再調整或改 Dataverse |
 
 ### 假設
