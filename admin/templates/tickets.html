@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}工單列表{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+  <div class="col-md-2"><div class="card stats-card shadow-sm"><div class="card-body text-center"><div class="text-muted small">New</div><div class="h3 text-warning">{{ stats.new }}</div></div></div></div>
+  <div class="col-md-2"><div class="card stats-card shadow-sm"><div class="card-body text-center"><div class="text-muted small">Assigned</div><div class="h3 text-primary">{{ stats.assigned }}</div></div></div></div>
+  <div class="col-md-2"><div class="card stats-card shadow-sm"><div class="card-body text-center"><div class="text-muted small">InProgress</div><div class="h3 text-info">{{ stats.in_progress }}</div></div></div></div>
+  <div class="col-md-2"><div class="card stats-card shadow-sm"><div class="card-body text-center"><div class="text-muted small">Done</div><div class="h3 text-secondary">{{ stats.done }}</div></div></div></div>
+  <div class="col-md-4"><div class="card stats-card shadow-sm"><div class="card-body text-center"><div class="text-muted small">Total</div><div class="h3">{{ stats.total }}</div></div></div></div>
+</div>
+
+<form class="row g-2 mb-3" method="get">
+  <div class="col-md-3">
+    <label class="form-label small text-muted mb-1">狀態</label>
+    <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="active" {% if status_filter == 'active' %}selected{% endif %}>進行中 (New + Assigned + InProgress)</option>
+      <option value="all" {% if status_filter == 'all' %}selected{% endif %}>全部</option>
+      {% for s in status_options %}
+      <option value="{{ s }}" {% if status_filter == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <label class="form-label small text-muted mb-1">負責人</label>
+    <select name="assignee" class="form-select form-select-sm" onchange="this.form.submit()">
+      <option value="">全部</option>
+      {% for a in assignee_options %}
+      <option value="{{ a }}" {% if assignee_filter == a %}selected{% endif %}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <label class="form-label small text-muted mb-1">搜尋（描述／系統）</label>
+    <input type="text" name="q" value="{{ q }}" class="form-control form-control-sm" placeholder="輸入關鍵字…">
+  </div>
+  <div class="col-md-2 d-flex align-items-end">
+    <button class="btn btn-sm btn-primary me-2">套用</button>
+    <a href="/tickets" class="btn btn-sm btn-outline-secondary">重設</a>
+  </div>
+</form>
+
+<div class="text-muted small mb-2">共 {{ total_filtered }} 張符合條件{% if total_filtered > total_shown %}，顯示前 {{ total_shown }} 張{% endif %}</div>
+
+<div class="table-responsive shadow-sm">
+<table class="table table-hover table-bordered bg-white mb-0">
+  <thead class="table-dark">
+    <tr>
+      <th style="width: 70px">#ID</th>
+      <th style="width: 100px">系統</th>
+      <th>描述</th>
+      <th style="width: 120px">報修人</th>
+      <th style="width: 100px">負責人</th>
+      <th style="width: 110px">狀態</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for t in tickets %}
+    <tr class="status-{{ t.status.value|lower }}">
+      <td><a href="/tickets/{{ t.id }}">#{{ t.id }}</a></td>
+      <td>{{ t.system }}</td>
+      <td class="description-cell" title="{{ t.description }}">{{ t.description }}</td>
+      <td>{{ t.requester }}</td>
+      <td>{{ t.assignee or '—' }}</td>
+      <td><span class="badge bg-secondary">{{ t.status.value }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

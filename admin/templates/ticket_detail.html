@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}工單 #{{ ticket.id }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="/tickets">工單</a></li>
+    <li class="breadcrumb-item active">#{{ ticket.id }}</li>
+  </ol>
+</nav>
+
+<div class="row">
+  <div class="col-md-8">
+    <div class="card shadow-sm mb-3">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">#{{ ticket.id }} {{ ticket.title }}</h5>
+        <span class="badge bg-primary fs-6">{{ ticket.status.value }}</span>
+      </div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-3">系統</dt><dd class="col-sm-9">{{ ticket.system }}</dd>
+          <dt class="col-sm-3">報修人</dt><dd class="col-sm-9">{{ ticket.requester }} <small class="text-muted">{{ ticket.requester_email }}</small></dd>
+          <dt class="col-sm-3">來源</dt><dd class="col-sm-9">{{ ticket.source }}</dd>
+          <dt class="col-sm-3">建立</dt><dd class="col-sm-9">{{ ticket.created_at }}</dd>
+          {% if ticket.completed_at %}
+          <dt class="col-sm-3">完成</dt><dd class="col-sm-9">{{ ticket.completed_at }}</dd>
+          {% endif %}
+          <dt class="col-sm-3">問題描述</dt>
+          <dd class="col-sm-9"><pre class="reply-log">{{ ticket.description }}</pre></dd>
+        </dl>
+      </div>
+    </div>
+
+    {% if ticket.reply %}
+    <div class="card shadow-sm mb-3">
+      <div class="card-header">處理紀錄（原始）</div>
+      <div class="card-body">
+        <pre class="reply-log">{{ ticket.reply }}</pre>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if ticket.resolution %}
+    <div class="card shadow-sm mb-3 border-success">
+      <div class="card-header bg-success text-white">處理方式（AI 摘要）</div>
+      <div class="card-body">
+        <p class="mb-0">{{ ticket.resolution }}</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-md-4">
+    <div class="card shadow-sm mb-3">
+      <div class="card-header">編輯</div>
+      <div class="card-body">
+        <form method="post" action="/tickets/{{ ticket.id }}/update">
+          <div class="mb-3">
+            <label class="form-label">負責人</label>
+            <input type="text" name="assignee" class="form-control" value="{{ ticket.assignee }}" list="assignee-list">
+            <datalist id="assignee-list">
+              {% for a in assignee_options %}<option value="{{ a }}">{% endfor %}
+            </datalist>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">狀態</label>
+            <select name="status" class="form-select">
+              {% for s in status_options %}
+              <option value="{{ s }}" {% if ticket.status.value == s %}selected{% endif %}>{{ s }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">加處理紀錄（會帶時戳）</label>
+            <textarea name="reply_add" class="form-control" rows="3" placeholder="處理過程、聯繫情況…"></textarea>
+          </div>
+          <button class="btn btn-primary w-100">儲存</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mb-3 border-warning">
+      <div class="card-header bg-warning">結案 + AI 摘要</div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">把 Status 設為 Done，並用 AI 摘要目前的處理紀錄成 Resolution。</p>
+        <form method="post" action="/tickets/{{ ticket.id }}/close" onsubmit="return confirm('確認結案？AI 會根據現有處理紀錄寫 Resolution。')">
+          <button class="btn btn-warning w-100">結案 + 摘要</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

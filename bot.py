@@ -52,12 +52,12 @@ def format_context(hits, current_owner_by_system):
 
 class DannyBot(ActivityHandler):
 
-    def __init__(self):
+    def __init__(self, ticket_store=None, system_store=None, llm=None):
         super().__init__()
-        self.llm = OpenAIProvider()
+        self.llm = llm or OpenAIProvider()
         self.retriever = HelpdeskRetriever()
-        self.system_store = MockSystemStore()
-        self.ticket_store = MockTicketStore()
+        self.system_store = system_store or MockSystemStore()
+        self.ticket_store = ticket_store or MockTicketStore()
         self.create_dialog = CreateTicketDialog(self.ticket_store, self.system_store)
 
     async def _get_user_info(self, turn_context: TurnContext):
