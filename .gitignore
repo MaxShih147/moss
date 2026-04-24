@@ -6,3 +6,5 @@ venv/
 chroma_db/
 data/*.parquet
 docs/Helpdesk.xlsx
+teams-app/danny-bot.zip
+.claude/

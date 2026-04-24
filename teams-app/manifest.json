@@ -1,0 +1,35 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.19/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.19",
+  "version": "1.0.0",
+  "id": "a8a989a9-9a21-4a83-92fb-6dd126e144a7",
+  "developer": {
+    "name": "Phrozen 3D",
+    "websiteUrl": "https://www.phrozen3d.com",
+    "privacyUrl": "https://www.phrozen3d.com/privacy",
+    "termsOfUseUrl": "https://www.phrozen3d.com/terms"
+  },
+  "icons": {
+    "color": "color.png",
+    "outline": "outline.png"
+  },
+  "name": {
+    "short": "Danny Bot",
+    "full": "Danny Bot - IT Helpdesk 助理"
+  },
+  "description": {
+    "short": "Phrozen 3D IT Helpdesk 助理",
+    "full": "Danny Bot 是 Phrozen 3D 的 IT Helpdesk 助理，協助員工解決 Outlook、ERP、BPM、VPN、印表機等 IT 問題，基於歷史工單提供處理建議。"
+  },
+  "accentColor": "#2C3E50",
+  "bots": [
+    {
+      "botId": "3da2de8e-04dc-4b36-b8d8-baab75e4b1f7",
+      "scopes": ["personal", "team"],
+      "supportsFiles": false,
+      "isNotificationOnly": false
+    }
+  ],
+  "permissions": ["identity", "messageTeamMembers"],
+  "validDomains": []
+}

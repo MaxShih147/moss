@@ -18,12 +18,12 @@ class HelpdeskRetriever:
     def __init__(self):
         self.openai = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.chroma = chromadb.PersistentClient(path=str(CHROMA_DIR))
-        self.col = self.chroma.get_collection(COLLECTION)
 
     async def search(self, query: str, k: int = 5):
         resp = await self.openai.embeddings.create(model=EMBED_MODEL, input=[query])
         vec = resp.data[0].embedding
-        res = self.col.query(query_embeddings=[vec], n_results=k)
+        col = self.chroma.get_collection(COLLECTION)
+        res = col.query(query_embeddings=[vec], n_results=k)
         hits = []
         for i in range(len(res["ids"][0])):
             hits.append({
